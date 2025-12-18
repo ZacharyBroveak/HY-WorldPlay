@@ -18,7 +18,7 @@ from typing import Any, Tuple, Optional, Union, Dict
 
 import torch
 import torch.nn as nn
-from einops import rearrange
+from einops import rearrange, repeat
 from loguru import logger
 
 from diffusers.models import ModelMixin
@@ -362,7 +362,7 @@ class MMDoubleStreamBlock(nn.Module):
         return img, txt
 
     @torch_compile_wrapper()
-    def forward(
+    def forward_sr(
             self,
             img: torch.Tensor,
             txt: torch.Tensor,
@@ -415,6 +415,24 @@ class MMDoubleStreamBlock(nn.Module):
         )
 
         return img, txt
+
+    @torch_compile_wrapper()
+    def forward(
+            self,
+            bi_inference=True,
+            ar_txt_inference=False,
+            ar_vision_inference=False,
+            **kwargs,
+    ):
+        if bi_inference:
+            return self.forward_bi(**kwargs)
+        elif ar_txt_inference:
+            return self.forward_txt(**kwargs)
+        elif ar_vision_inference:
+            return self.forward_vision(**kwargs)
+        else:
+            return self.forward_sr(**kwargs)
+
 
 class MMSingleStreamBlock(nn.Module):
 
@@ -921,13 +939,15 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
             if block.img_attn_prope_proj.bias is not None:
                 nn.init.zeros_(block.img_attn_prope_proj.bias)
 
-    def get_text_and_mask(self,
-                    encoder_attention_mask,
-                    text_states,
-                    timestep_txt,
-                    extra_kwargs,
-                    vision_states,
-                    mask_type):
+    def get_text_and_mask(
+        self,
+        encoder_attention_mask,
+        text_states,
+        timestep_txt,
+        extra_kwargs,
+        vision_states,
+        mask_type
+    ):
         text_mask = encoder_attention_mask
         txt = text_states
         bs = txt.shape[0]
@@ -1022,7 +1042,10 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
 
         # Pass through double-stream blocks
         for index, block in enumerate(self.double_blocks):
-            txt = block.forward_txt(
+            txt = block(
+                bi_inference=False,
+                ar_txt_inference=True,
+                ar_vision_inference=False,
                 txt=txt,
                 vec_txt=vec_txt,
                 text_mask=None,      # we have masked txt tokens already, set None here
@@ -1068,11 +1091,24 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
             per_latent_size = th * tw
             start_index = start_rope_start_idx * per_latent_size
             end_index = (start_rope_start_idx + tt) * per_latent_size
-            freqs_cos = freqs_cos[start_index: end_index,...]
-            freqs_sin = freqs_sin[start_index: end_index,...]
+            freqs_cos = freqs_cos[start_index: end_index, ...]
+            freqs_sin = freqs_sin[start_index: end_index, ...]
 
         img = self.img_in(img)
 
+        action = action.reshape(-1)
+        t = t.reshape(-1)
+
+        # Prepare modulation vectors
+        vec = self.time_in(t)
+        vec = vec + self.action_in(action)  # inject discrete action
+
+        # boardcast to match the sequence length of video latents
+        vec = repeat(vec, "(B T) C->B (T H W) C", B=img.shape[0], H=th, W=tw)
+        viewmats = repeat(viewmats, 'B T M N->B (T H W) M N', H=th, W=tw)
+        Ks = repeat(Ks, 'B T M N->B (T H W) M N', H=th, W=tw)
+
+        # sequence parallel
         parallel_dims = get_parallel_state()
         sp_enabled = parallel_dims.sp_enabled
         if sp_enabled:
@@ -1080,32 +1116,29 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
             sp_rank = parallel_dims.sp_rank
             if img.shape[1] % sp_size != 0:
                 n_token = img.shape[1]
-                assert n_token > (n_token // sp_size + 1) * (sp_size - 1), f'Too short context length for SP {sp_size}'
+                assert n_token > (n_token // sp_size + 1) * (
+                        sp_size - 1), f'Too short context length for SP {sp_size}'
             img = torch.chunk(img, sp_size, dim=1)[sp_rank]
             freqs_cos = torch.chunk(freqs_cos, sp_size, dim=0)[sp_rank]
             freqs_sin = torch.chunk(freqs_sin, sp_size, dim=0)[sp_rank]
 
+            vec = torch.chunk(vec, sp_size, dim=1)[sp_rank]
+            vec = rearrange(vec, 'B S C->(B S) C')
             viewmats = torch.chunk(viewmats, sp_size, dim=1)[sp_rank]
             Ks = torch.chunk(Ks, sp_size, dim=1)[sp_rank]
-            action = action.reshape(img.shape[0], -1)
-            t = t.reshape(img.shape[0], -1)
-            action = torch.chunk(action, sp_size, dim=1)[sp_rank]
-            t = torch.chunk(t, sp_size, dim=1)[sp_rank]
-            action = action.reshape(-1)
-            t = t.reshape(-1)
-
-        # Prepare modulation vectors
-        vec = self.time_in(t)
-
-        vec = vec + self.action_in(action) # inject discrete action
+        else:
+            vec = rearrange(vec, 'B S C->(B S) C')
 
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
 
         # Pass through double-stream blocks
         for index, block in enumerate(self.double_blocks):
-            self.attn_param["layer-name"] = f"double_block_{index+1}"
+            self.attn_param["layer-name"] = f"double_block_{index + 1}"
 
-            img = block.forward_vision(
+            img = block(
+                bi_inference=False,
+                ar_txt_inference=False,
+                ar_vision_inference=True,
                 img=img,
                 vec=vec,
                 freqs_cis=freqs_cis,
@@ -1126,7 +1159,7 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
         features_list = None
         return (img, features_list)
 
-    def forward(
+    def forward_bi(
         self,
         hidden_states: torch.Tensor,
         timestep: torch.LongTensor,
@@ -1155,9 +1188,7 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
             )
 
         img = x = hidden_states
-        text_mask = encoder_attention_mask
         t = timestep
-        txt = text_states
         bs, _, ot, oh, ow = x.shape
         tt, th, tw = (
             ot // self.patch_size[0],
@@ -1169,29 +1200,6 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
             freqs_cos, freqs_sin = self.get_rotary_pos_embed((tt, th, tw))
 
         img = self.img_in(img)
-
-        parallel_dims = get_parallel_state()
-        sp_enabled = parallel_dims.sp_enabled
-        if sp_enabled:
-            sp_size = parallel_dims.sp
-            sp_rank = parallel_dims.sp_rank
-            if img.shape[1] % sp_size != 0:
-                n_token = img.shape[1]
-                assert n_token > (n_token // sp_size + 1) * (sp_size - 1), f'Too short context length for SP {sp_size}'
-            img = torch.chunk(img, sp_size, dim=1)[sp_rank]
-            freqs_cos = torch.chunk(freqs_cos, sp_size, dim=0)[sp_rank]
-            freqs_sin = torch.chunk(freqs_sin, sp_size, dim=0)[sp_rank]
-
-            if action is not None:
-                viewmats = torch.chunk(viewmats, sp_size, dim=1)[sp_rank]
-                Ks = torch.chunk(Ks, sp_size, dim=1)[sp_rank]
-                action = action.reshape(img.shape[0], -1)
-                action = torch.chunk(action, sp_size, dim=1)[sp_rank]
-                action = action.reshape(-1)
-                t = t.reshape(img.shape[0], -1)
-                t = torch.chunk(t, sp_size, dim=1)[sp_rank]
-                t = t.reshape(-1)
-
         vec = self.time_in(t)
 
         if text_states_2 is not None:
@@ -1209,7 +1217,34 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
             vec = vec + self.time_r_in(timestep_r)
 
         if action is not None:
-            vec = vec + self.action_in(action) # 添加离散的action
+            vec = vec + self.action_in(action)  # 添加离散的action
+
+        # boardcast to match the sequence length of video latents
+        vec = repeat(vec, "(B T) C->B (T H W) C", B=img.shape[0], H=th, W=tw)
+        if viewmats is not None:
+            viewmats = repeat(viewmats, 'B T M N->B (T H W) M N', H=th, W=tw)
+            Ks = repeat(Ks, 'B T M N->B (T H W) M N', H=th, W=tw)
+
+        # sequence parallel
+        parallel_dims = get_parallel_state()
+        sp_enabled = parallel_dims.sp_enabled
+        if sp_enabled:
+            sp_size = parallel_dims.sp
+            sp_rank = parallel_dims.sp_rank
+            if img.shape[1] % sp_size != 0:
+                n_token = img.shape[1]
+                assert n_token > (n_token // sp_size + 1) * (sp_size - 1), f'Too short context length for SP {sp_size}'
+            img = torch.chunk(img, sp_size, dim=1)[sp_rank]
+            freqs_cos = torch.chunk(freqs_cos, sp_size, dim=0)[sp_rank]
+            freqs_sin = torch.chunk(freqs_sin, sp_size, dim=0)[sp_rank]
+
+            vec = torch.chunk(vec, sp_size, dim=1)[sp_rank]
+            vec = rearrange(vec, 'B S C->(B S) C')
+            if viewmats is not None:
+                viewmats = torch.chunk(viewmats, sp_size, dim=1)[sp_rank]
+                Ks = torch.chunk(Ks, sp_size, dim=1)[sp_rank]
+        else:
+            vec = rearrange(vec, 'B S C->(B S) C')
 
         txt, text_mask, vec_txt = self.get_text_and_mask(
             encoder_attention_mask,
@@ -1225,23 +1260,27 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
         # Pass through double-stream blocks
         for index, block in enumerate(self.double_blocks):
             force_full_attn = (
-                self.attn_mode in ["flex-block-attn"]
-                and self.attn_param["win_type"] == "hybrid"
-                and self.attn_param["win_ratio"] > 0
-                and (
-                    (index + 1) % self.attn_param["win_ratio"] == 0
-                    or (index + 1) == len(self.double_blocks)
-                )
+                    self.attn_mode in ["flex-block-attn"]
+                    and self.attn_param["win_type"] == "hybrid"
+                    and self.attn_param["win_ratio"] > 0
+                    and (
+                            (index + 1) % self.attn_param["win_ratio"] == 0
+                            or (index + 1) == len(self.double_blocks)
+                    )
             )
-            self.attn_param["layer-name"] = f"double_block_{index+1}"
+            self.attn_param["layer-name"] = f"double_block_{index + 1}"
             if viewmats is not None:
                 img, txt = block.forward_bi(
+                img, txt = block(
+                    bi_inference=True,
+                    ar_txt_inference=False,
+                    ar_vision_inference=False,
                     img=img,
                     txt=txt,
                     vec_txt=vec_txt,
                     vec=vec,
                     freqs_cis=freqs_cis,
-                    text_mask=text_mask,      # we have masked txt tokens already, set None here
+                    text_mask=text_mask,  # we have masked txt tokens already, set None here
                     attn_param=self.attn_param,
                     is_flash=force_full_attn,
                     block_idx=index,
@@ -1250,6 +1289,9 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
                 )
             else:
                 img, txt = block(
+                    bi_inference=False,
+                    ar_txt_inference=False,
+                    ar_vision_inference=False,
                     img=img,
                     txt=txt,
                     vec_txt=vec_txt,
@@ -1269,6 +1311,22 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
         assert return_dict is False, "return_dict is not supported."
         features_list = None
         return (img, features_list)
+
+    def forward(
+            self,
+            bi_inference=True,
+            ar_txt_inference=False,
+            ar_vision_inference=False,
+            **kwargs,
+    ):
+        if bi_inference:
+            return self.forward_bi(**kwargs)
+        elif ar_txt_inference:
+            return self.forward_txt(**kwargs)
+        elif ar_vision_inference:
+            return self.forward_vision(**kwargs)
+        else:
+            raise NotImplementedError
 
     def unpatchify(self, x, t, h, w):
         """
