@@ -147,11 +147,11 @@ Try our **online demo** without installation: https://3d.hunyuan.tencent.com/sce
 
 ## 🧱 Model Checkpoints
 
-| Model | Description | Download |
-|-------|-------------|----------|
-| HY-World1.5-Bidirectional-480P-I2V | Best quality, slower | [Link](https://huggingface.co/tencent/HY-WorldPlay/tree/main/bidirectional_model) |
-| HY-World1.5-Autoregressive-480P-I2V | Balanced speed/quality | [Link](https://huggingface.co/tencent/HY-WorldPlay/tree/main/ar_model) |
-| HY-World1.5-Autoregressive-480P-I2V-distill | Fastest (4-step), real-time | [Link](https://huggingface.co/tencent/HY-WorldPlay/tree/main/ar_distilled_action_model) |   
+| Model |  Download |
+|-------|----------|
+| HY-World1.5-Bidirectional-480P-I2V |  [Link](https://huggingface.co/tencent/HY-WorldPlay/tree/main/bidirectional_model) |
+| HY-World1.5-Autoregressive-480P-I2V |  [Link](https://huggingface.co/tencent/HY-WorldPlay/tree/main/ar_model) |
+| HY-World1.5-Autoregressive-480P-I2V-distill | [Link](https://huggingface.co/tencent/HY-WorldPlay/tree/main/ar_distilled_action_model) |   
 
 ## 🔑 Inference
 

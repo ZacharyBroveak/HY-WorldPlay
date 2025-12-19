@@ -110,112 +110,83 @@ https://github.com/user-attachments/assets/643a33a4-b677-4eff-ad1d-32205c594274
 
 免安装试用我们的**在线服务**: https://3d.hunyuan.tencent.com/sceneTo3D
 
-## 🧱 下载预训练模型
-我们提供了使用混元视频-1.5 的实现，这是最强大的开源视频扩散模型之一。模型权重可在 [这里](https://huggingface.co/tencent/HY-WorldPlay) 下载。
+## 🧱 模型权重
 
-您可以使用`huggingface-cli`命令下载所有三个模型：
-```bash
-hf download tencent/HY-WorldPlay
-```
-
-|模型名称| 下载                     |
-|-|-------------------------------------------|
-HY-World1.5-Bidirectional-480P-I2V |  [下载地址](https://huggingface.co/tencent/HY-WorldPlay/tree/main/bidirectional_model)   |
-HY-World1.5-Autoregressive-480P-I2V | [下载地址](https://huggingface.co/tencent/HY-WorldPlay/tree/main/ar_model)   |
-HY-World1.5-Autoregressive-480P-I2V-distill |  [下载地址](https://huggingface.co/tencent/HY-WorldPlay/tree/main/ar_distilled_action_model)   |
+| 模型 |  下载 |
+|------|------|
+| HY-World1.5-Bidirectional-480P-I2V |  [下载地址](https://huggingface.co/tencent/HY-WorldPlay/tree/main/bidirectional_model) |
+| HY-World1.5-Autoregressive-480P-I2V |  [下载地址](https://huggingface.co/tencent/HY-WorldPlay/tree/main/ar_model) |
+| HY-World1.5-Autoregressive-480P-I2V-distill |  [下载地址](https://huggingface.co/tencent/HY-WorldPlay/tree/main/ar_distilled_action_model) |
 
 ## 🔑 推理
-我们开源了双向和自回归扩散模型的推理代码。对于提示重写，我们建议使用 Gemini 或通过 vLLM 部署的模型。此代码库目前仅支持与 vLLM API 兼容的模型。如果您希望使用 Gemini，您需要实现自己的接口调用。详情可参考 [HunyuanVideo-1.5](https://github.com/Tencent-Hunyuan/HunyuanVideo-1.5)。
 
-我们建议使用 `generate_custom_trajectory.py` 生成自定义相机轨迹。
+### 配置模型路径
+
+运行 `download_models.py` 后，使用打印的模型路径更新 `run.sh`：
+
+```bash
+# 这些路径由 download_models.py 在下载完成后打印
+MODEL_PATH=<download_script打印的路径>
+AR_ACTION_MODEL_PATH=<download_script打印的路径>/ar_model
+BI_ACTION_MODEL_PATH=<download_script打印的路径>/bidirectional_model
+AR_DISTILL_ACTION_MODEL_PATH=<download_script打印的路径>/ar_distilled_action_model
+```
+
+### 配置选项
+
+在 `run.sh` 中，您可以配置：
+
+| 参数 | 描述 |
+|------|------|
+| `PROMPT` | 场景的文本描述 |
+| `IMAGE_PATH` | 输入图像路径（I2V 必需） |
+| `NUM_FRAMES` | 要生成的帧数（默认：125） |
+| `N_INFERENCE_GPU` | 并行推理的 GPU 数量 |
+| `POSE_JSON_PATH` | 相机轨迹文件 |
+
+### 模型选择
+
+在 `run.sh` 中取消注释三个推理命令之一：
+
+1. **双向模型**：
+   ```bash
+   --action_ckpt $BI_ACTION_MODEL_PATH --model_type 'bi'
+   ```
+
+2. **自回归模型**：
+   ```bash
+   --action_ckpt $AR_ACTION_MODEL_PATH --model_type 'ar'
+   ```
+
+3. **蒸馏模型**：
+   ```bash
+   --action_ckpt $AR_DISTILL_ACTION_MODEL_PATH --few_step true --num_inference_steps 4 --model_type 'ar'
+   ```
+
+### 自定义相机轨迹
+
+使用 `generate_custom_trajectory.py` 创建自定义相机路径：
+
+```bash
+python generate_custom_trajectory.py
+```
+
+### 提示重写（可选）
+
+为获得更好的提示，您可以使用 vLLM 服务器启用提示重写：
 
 ```bash
 export T2V_REWRITE_BASE_URL="<your_vllm_server_base_url>"
 export T2V_REWRITE_MODEL_NAME="<your_model_name>"
-export I2V_REWRITE_BASE_URL="<your_vllm_server_base_url>"
-export I2V_REWRITE_MODEL_NAME="<your_model_name>"
+REWRITE=true  # 在 run.sh 中
+```
 
-PROMPT='一条铺好的小路通向一座横跨平静水面的石拱桥。郁郁葱葱的绿树和植被沿着小路和水的远岸排列。一座传统风格的凉亭，带有分层的红褐色屋顶，坐落在远岸。水面倒映着周围的绿色植物和天空。场景沐浴在柔和的自然光中，营造出宁静祥和的氛围。小路由大块的矩形石头组成，桥梁由浅灰色石头建造。整体构图强调了景观的和平与和谐。'
+### 运行推理
 
-IMAGE_PATH=./assets/img/test.png # 现在我们只提供 i2v 模型，所以路径不能为 None
-SEED=1
-ASPECT_RATIO=16:9
-RESOLUTION=480p                  # 现在我们只提供 480p 模型
-OUTPUT_PATH=./outputs/
-MODEL_PATH=                      # 预训练 hunyuanvideo-1.5 模型的路径
-AR_ACTION_MODEL_PATH=            # 我们的 HY-World 1.5 自回归模型权重的路径
-BI_ACTION_MODEL_PATH=            # 我们的 HY-World 1.5 双向模型权重的路径
-AR_DISTILL_ACTION_MODEL_PATH=    # 我们的 HY-World 1.5 自回归蒸馏模型权重的路径
-POSE_JSON_PATH=./assets/pose/test_forward_32_latents.json   # 自定义相机轨迹的路径
-NUM_FRAMES=125
-WIDTH=832
-HEIGHT=480
+在编辑 `run.sh` 配置设置后，运行：
 
-# 更快推理的配置
-# 建议的最大数量是 8。
-N_INFERENCE_GPU=8 # 并行推理 GPU 数量。
-
-# 更好质量的配置
-REWRITE=false # 启用提示重写。请确保重写 vLLM 服务器已部署和配置。
-ENABLE_SR=false # 启用超分辨率。当 NUM_FRAMES == 121 时，您可以将其设置为 true
-
-# 使用双向模型推理
-torchrun --nproc_per_node=$N_INFERENCE_GPU generate.py  \
-  --prompt "$PROMPT" \
-  --image_path $IMAGE_PATH \
-  --resolution $RESOLUTION \
-  --aspect_ratio $ASPECT_RATIO \
-  --video_length $NUM_FRAMES \
-  --seed $SEED \
-  --rewrite $REWRITE \
-  --sr $ENABLE_SR --save_pre_sr_video \
-  --pose_json_path $POSE_JSON_PATH \
-  --output_path $OUTPUT_PATH \
-  --model_path $MODEL_PATH \
-  --action_ckpt $BI_ACTION_MODEL_PATH \
-  --few_step false \
-  --width $WIDTH \
-  --height $HEIGHT \
-  --model_type 'bi'
-
-# 使用自回归模型推理
-#torchrun --nproc_per_node=$N_INFERENCE_GPU generate.py  \
-#  --prompt "$PROMPT" \
-#  --image_path $IMAGE_PATH \
-#  --resolution $RESOLUTION \
-#  --aspect_ratio $ASPECT_RATIO \
-#  --video_length $NUM_FRAMES \
-#  --seed $SEED \
-#  --rewrite $REWRITE \
-#  --sr $ENABLE_SR --save_pre_sr_video \
-#  --pose_json_path $POSE_JSON_PATH \
-#  --output_path $OUTPUT_PATH \
-#  --model_path $MODEL_PATH \
-#  --action_ckpt $AR_ACTION_MODEL_PATH \
-#  --few_step false \
-#  --width $WIDTH \
-#  --height $HEIGHT \
-#  --model_type 'ar'
-
-# 使用自回归蒸馏模型推理
-#torchrun --nproc_per_node=$N_INFERENCE_GPU generate.py  \
-#  --prompt "$PROMPT" \
-#  --image_path $IMAGE_PATH \
-#  --resolution $RESOLUTION \
-#  --aspect_ratio $ASPECT_RATIO \
-#  --video_length $NUM_FRAMES \
-#  --seed $SEED \
-#  --rewrite $REWRITE \
-#  --sr $ENABLE_SR --save_pre_sr_video \
-#  --pose_json_path $POSE_JSON_PATH \
-#  --output_path $OUTPUT_PATH \
-#  --model_path $MODEL_PATH \
-#  --action_ckpt $AR_DISTILL_ACTION_MODEL_PATH \
-#  --few_step true \
-#  --num_inference_steps 4 \
-#  --width $WIDTH \
-#  --height $HEIGHT \
-#  --model_type 'ar'
+```bash
+bash run.sh
 ```
 
 
