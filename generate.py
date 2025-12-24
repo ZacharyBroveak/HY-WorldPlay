@@ -188,6 +188,25 @@ def generate_video(args):
         action_ckpt=args.action_ckpt,
     )
 
+    layer_bits = None
+    if args.sq_layer_bits:
+        try:
+            layer_bits = json.loads(args.sq_layer_bits)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON for --sq_layer_bits: {args.sq_layer_bits}") from exc
+
+    if args.smoothquant:
+        from smoothquant.fake_quant import quantize_hyworldplay
+
+        quantize_hyworldplay(
+            pipe.transformer,
+            double_n_bits=args.sq_double_bits,
+            single_n_bits=args.sq_single_bits,
+            final_n_bits=args.sq_final_bits,
+            cond_n_bits=args.sq_cond_bits,
+            layer_bits=layer_bits,
+        )
+
     extra_kwargs = {}
     if task == 'i2v':
         extra_kwargs['reference_image'] = args.image_path
@@ -313,6 +332,30 @@ def main():
         '--dtype', type=str, default='bf16', choices=['bf16', 'fp32'],
         help='Data type for transformer (default: bf16). '
              'bf16: faster, lower memory; fp32: better quality, slower, higher memory'
+    )
+    parser.add_argument(
+        '--smoothquant', action='store_true',
+        help='Enable SmoothQuant-style fake quantization for the transformer blocks'
+    )
+    parser.add_argument(
+        '--sq_double_bits', type=int, default=8,
+        help='Bitwidth for double-stream blocks (default: 8)'
+    )
+    parser.add_argument(
+        '--sq_single_bits', type=int, default=8,
+        help='Bitwidth for single-stream blocks (default: 8)'
+    )
+    parser.add_argument(
+        '--sq_final_bits', type=int, default=None,
+        help='Bitwidth for the final projection (omit to keep full precision)'
+    )
+    parser.add_argument(
+        '--sq_cond_bits', type=int, default=None,
+        help='Bitwidth for timestep/action/vector embedders (omit to keep full precision)'
+    )
+    parser.add_argument(
+        '--sq_layer_bits', type=str, default=None,
+        help='Optional JSON mapping of layer names to bitwidths/None for overrides'
     )
     parser.add_argument(
         '--seed', type=int, default=123,

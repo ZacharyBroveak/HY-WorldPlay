@@ -88,12 +88,23 @@ def generate_camera_trajectory_local(motions):
 
 # Examples: Forward 0.08 * 16 -> Right Rotate 3 degree * 16
 motions = []
-for i in range(15):
+for i in range(16):
     motions.append({"forward": 0.08})
 
 for i in range(16):
     motions.append({"yaw": np.deg2rad(3)})
 
+for i in range(20):
+    motions.append({"yaw": np.deg2rad(-3)})
+
+for i in range(16):
+    motions.append({"forward": -0.08})
+
+for i in range(16):
+    motions.append({"yaw": np.deg2rad(-3)})
+
+for i in range(7):
+    motions.append({"forward": -0.08})
 
 intrinsic = [
                 [
@@ -117,4 +128,4 @@ poses = generate_camera_trajectory_local(motions)
 custom_c2w = {}
 for i, p in enumerate(poses):
     custom_c2w[str(i)] = {"extrinsic": p.tolist(), "K": intrinsic}
-    json.dump(custom_c2w, open('./assets/pose/pose.json', 'w'), indent=4, ensure_ascii=False)
+    json.dump(custom_c2w, open('./assets/pose/pose1.json', 'w'), indent=4, ensure_ascii=False)
