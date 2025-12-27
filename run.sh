@@ -1,9 +1,10 @@
+export MASTER_PORT=29600
 torchrun --nproc_per_node=1 generate.py \
   --prompt "a scene" \
   --image_path "./assets/img/1.png" \
   --resolution "480p" \
   --aspect_ratio "16:9" \
-  --video_length 365 \
+  --video_length 13 \
   --seed 42 \
   --rewrite false \
   --sr false --save_pre_sr_video \
@@ -15,7 +16,15 @@ torchrun --nproc_per_node=1 generate.py \
   --num_inference_steps 4 \
   --width 832 \
   --height 480 \
-  --model_type ar
+  --model_type ar \
+  --generate_heatmaps true \
+  --heatmap_output_dir "./outputs/heatmaps" \
+
+  #--smoothquant \
+  #--sq_double_bits 5 \
+  #--sq_single_bits 5 \
+  #--sq_final_bits 5 \
+  #--sq_cond_bits 5 \
 
 #export T2V_REWRITE_BASE_URL="<your_vllm_server_base_url>"
 #export T2V_REWRITE_MODEL_NAME="<your_model_name>"

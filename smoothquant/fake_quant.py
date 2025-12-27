@@ -226,6 +226,24 @@ def quantize_hyworldplay(
         _quantize_linear_attr(mlp, "fc1", f"{name}.fc1", idx, default_bits)
         _quantize_linear_attr(mlp, "fc2", f"{name}.fc2", idx, default_bits)
 
+    def _quantize_seq_linear(seq: nn.Sequential, linear_idx: int, name: str, idx: Optional[int], default_bits: Optional[int]) -> None:
+        if seq is None or not isinstance(seq, nn.Sequential) or linear_idx >= len(seq):
+            return
+        if not isinstance(seq[linear_idx], nn.Linear):
+            return
+        bits = _resolve_bits(name, idx, default_bits)
+        if bits is None:
+            return
+        seq[linear_idx] = W8A8Linear.from_float(seq[linear_idx], weight_quant=weight_quant, act_quant=act_quant, n_bits=bits)
+
+    def _quantize_conv_weight(conv: nn.Module, name: str, idx: Optional[int], default_bits: Optional[int]) -> None:
+        bits = _resolve_bits(name, idx, default_bits)
+        if bits is None or conv is None or not isinstance(conv, (nn.Conv2d, nn.Conv3d)):
+            return
+        quantize_weight_per_tensor_absmax(conv.weight, n_bits=bits)
+        if conv.bias is not None:
+            quantize_weight_per_tensor_absmax(conv.bias, n_bits=bits)
+
     # Double-stream blocks
     for idx, block in enumerate(getattr(transformer, "double_blocks", [])):
         block_bits = _resolve_bits("double", idx, double_n_bits)
@@ -271,8 +289,16 @@ def quantize_hyworldplay(
             None,
             final_n_bits,
         )
+        if hasattr(transformer.final_layer, "adaLN_modulation"):
+            _quantize_seq_linear(
+                transformer.final_layer.adaLN_modulation,
+                1,
+                "final.adaln",
+                None,
+                final_n_bits,
+            )
 
-    # Time/action/vector embedders
+    # Time/action/vector embedders and other front-end projections
     if cond_n_bits is not None:
         def _quantize_embedder(embedder: nn.Module, name: str) -> None:
             if embedder is None or not hasattr(embedder, "mlp"):
@@ -296,5 +322,51 @@ def quantize_hyworldplay(
         _quantize_embedder(getattr(transformer, "time_r_in", None), "cond.time_r_in")
         _quantize_embedder(getattr(transformer, "action_in", None), "cond.action_in")
         _quantize_mlp_embedder(getattr(transformer, "vector_in", None), "cond.vector_in")
+
+        # PatchEmbed conv projection (img_in.proj)
+        _quantize_conv_weight(getattr(transformer, "img_in", None).proj if hasattr(getattr(transformer, "img_in", None), "proj") else None,
+                              "img_in.proj", None, cond_n_bits)
+
+        # Text projection path
+        txt_in = getattr(transformer, "txt_in", None)
+        if txt_in is not None:
+            if hasattr(txt_in, "input_embedder"):  # SingleTokenRefiner path
+                _quantize_linear_attr(txt_in, "input_embedder", "txt_in.input_embedder", None, cond_n_bits)
+                if hasattr(txt_in, "c_embedder"):
+                    _quantize_linear_attr(txt_in.c_embedder, "linear_1", "txt_in.c_embedder.linear1", None, cond_n_bits)
+                    _quantize_linear_attr(txt_in.c_embedder, "linear_2", "txt_in.c_embedder.linear2", None, cond_n_bits)
+                if hasattr(txt_in, "t_embedder"):
+                    _quantize_embedder(txt_in.t_embedder, "txt_in.t_embedder")
+                if hasattr(txt_in, "individual_token_refiner"):
+                    refiner = txt_in.individual_token_refiner
+                    if hasattr(refiner, "blocks"):
+                        for b_idx, block in enumerate(refiner.blocks):
+                            _quantize_linear_attr(block, "self_attn_qkv", "txt_in.refiner.self_attn_qkv", b_idx, cond_n_bits)
+                            _quantize_linear_attr(block, "self_attn_proj", "txt_in.refiner.self_attn_proj", b_idx, cond_n_bits)
+                            if hasattr(block, "mlp"):
+                                _quantize_mlp(block.mlp, "txt_in.refiner.mlp", b_idx, cond_n_bits)
+                            if hasattr(block, "adaLN_modulation") and isinstance(block.adaLN_modulation, nn.Sequential) and len(block.adaLN_modulation) >= 2:
+                                _quantize_seq_linear(block.adaLN_modulation, 1, "txt_in.refiner.adaln", b_idx, cond_n_bits)
+            else:
+                # Plain TextProjection path
+                _quantize_linear_attr(txt_in, "linear_1", "txt_in.linear1", None, cond_n_bits)
+                _quantize_linear_attr(txt_in, "linear_2", "txt_in.linear2", None, cond_n_bits)
+
+        # Vision projection
+        vision_in = getattr(transformer, "vision_in", None)
+        if vision_in is not None and hasattr(vision_in, "proj"):
+            _quantize_seq_linear(vision_in.proj, 1, "vision_in.proj.fc1", None, cond_n_bits)
+            _quantize_seq_linear(vision_in.proj, 3, "vision_in.proj.fc2", None, cond_n_bits)
+
+        # ByT5 mapper
+        byt5_in = getattr(transformer, "byt5_in", None)
+        if byt5_in is not None:
+            _quantize_linear_attr(byt5_in, "fc1", "byt5_in.fc1", None, cond_n_bits)
+            _quantize_linear_attr(byt5_in, "fc2", "byt5_in.fc2", None, cond_n_bits)
+            _quantize_linear_attr(byt5_in, "fc3", "byt5_in.fc3", None, cond_n_bits)
+
+        # Cond type embedding
+        if hasattr(transformer, "cond_type_embedding") and transformer.cond_type_embedding is not None:
+            quantize_weight_per_tensor_absmax(transformer.cond_type_embedding.weight, n_bits=cond_n_bits)
 
     return transformer

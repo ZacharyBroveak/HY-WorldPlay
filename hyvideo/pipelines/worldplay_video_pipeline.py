@@ -63,6 +63,11 @@ from hyvideo.models.vision_encoder import VisionEncoder
 
 from hyvideo.schedulers.scheduling_flow_match_discrete import FlowMatchDiscreteScheduler
 
+from hyvideo.utils.weight_heatmaps import (
+    DEFAULT_BLOCK_INDICES as HEATMAP_DEFAULT_BLOCKS,
+    DEFAULT_LAYER_ORDER as HEATMAP_DEFAULT_LAYERS,
+    generate_worldplay_heatmaps,
+)
 from hyvideo.utils.data_utils import (
     generate_crop_size_list,
     get_closest_ratio,
@@ -1716,7 +1721,8 @@ class HunyuanVideo_1_5_Pipeline(DiffusionPipeline):
     def create_pipeline(cls, pretrained_model_name_or_path, transformer_version, create_sr_pipeline=False,
                         force_sparse_attn=False, transformer_dtype=torch.bfloat16, enable_offloading=None,
                         enable_group_offloading=None, overlap_group_offloading=True, device=None,
-                        action_ckpt=None, **kwargs):
+                        action_ckpt=None, generate_heatmaps=False, heatmap_output_dir=None,
+                        heatmap_block_indices=None, heatmap_layers=None, **kwargs):
         # use snapshot download here to get it working from from_pretrained
         if not os.path.isdir(pretrained_model_name_or_path):
             if pretrained_model_name_or_path.count("/") > 1:
@@ -1821,6 +1827,22 @@ class HunyuanVideo_1_5_Pipeline(DiffusionPipeline):
             enable_offloading=enable_offloading,
             **PIPELINE_CONFIGS[transformer_version],
         )
+
+        if generate_heatmaps:
+            heatmap_rank = int(os.environ.get("RANK", "0"))
+            if heatmap_rank != 0:
+                logger.info(f"Skip heatmap generation on nonzero rank {heatmap_rank}.")
+            else:
+                try:
+                    saved_paths = generate_worldplay_heatmaps(
+                        transformer=pipeline.transformer,
+                        output_dir="outputs/heatmaps" if heatmap_output_dir is None else heatmap_output_dir,
+                        block_indices=HEATMAP_DEFAULT_BLOCKS if heatmap_block_indices is None else heatmap_block_indices,
+                        layers=HEATMAP_DEFAULT_LAYERS if heatmap_layers is None else heatmap_layers,
+                    )
+                    logger.info(f"Saved transformer weight heatmaps: {[str(p) for p in saved_paths]}")
+                except Exception as exc:  # surface but do not break pipeline creation
+                    logger.warning(f"Heatmap generation failed: {exc}")
 
         if create_sr_pipeline:
             sr_version = TRANSFORMER_VERSION_TO_SR_VERSION[transformer_version]

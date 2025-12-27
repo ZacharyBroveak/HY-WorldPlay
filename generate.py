@@ -186,6 +186,8 @@ def generate_video(args):
         force_sparse_attn=False,
         transformer_dtype=transformer_dtype,
         action_ckpt=args.action_ckpt,
+        generate_heatmaps=args.generate_heatmaps,
+        heatmap_output_dir=args.heatmap_output_dir,
     )
 
     layer_bits = None
@@ -391,6 +393,14 @@ def main():
     parser.add_argument(
         '--width', type=int, default=None,
         help='width for generation (recommended to set as 832)'
+    )
+    parser.add_argument(
+        '--generate_heatmaps', type=str_to_bool, nargs='?', const=True, default=False,
+        help='Generate transformer weight heatmaps after loading (default: false)'
+    )
+    parser.add_argument(
+        '--heatmap_output_dir', type=str, default='outputs/heatmaps',
+        help='Directory to write heatmap PNGs when --generate_heatmaps is enabled'
     )
 
     args = parser.parse_args()
