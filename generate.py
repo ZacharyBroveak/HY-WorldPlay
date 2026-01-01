@@ -166,9 +166,10 @@ def generate_video(args):
     
     enable_sr = args.sr
     
-    # Build transformer_version based on flags
-    transformer_version = f'{args.resolution}_{task}'
-    assert transformer_version == "480p_i2v"
+    # Build transformer_version based on flags (allow override via CLI)
+    transformer_version = args.transformer_version or f'{args.resolution}_{task}'
+    if args.transformer_version is None:
+        assert transformer_version == "480p_i2v"
 
     if args.dtype == 'bf16':
         transformer_dtype = torch.bfloat16
@@ -183,7 +184,7 @@ def generate_video(args):
         enable_offloading=args.offloading,
         enable_group_offloading=args.group_offloading,
         create_sr_pipeline=enable_sr,
-        force_sparse_attn=False,
+        force_sparse_attn=args.force_sparse_attn,
         transformer_dtype=transformer_dtype,
         action_ckpt=args.action_ckpt,
         generate_heatmaps=args.generate_heatmaps,
@@ -291,6 +292,10 @@ def main():
         help='Path to pretrained action model'
     )
     parser.add_argument(
+        '--transformer_version', type=str, default=None,
+        help='Override transformer version (default: <resolution>_<task>)'
+    )
+    parser.add_argument(
         '--aspect_ratio', type=str, default='16:9',
         help='Aspect ratio (default: 16:9)'
     )
@@ -340,6 +345,12 @@ def main():
         help='Enable SmoothQuant-style fake quantization for the transformer blocks'
     )
     parser.add_argument(
+        '--force_sparse_attn', type=str_to_bool, nargs='?', const=True, default=False,
+        help='Force sparse attention (flex-block-attn/SSTA). '
+             'Use --force_sparse_attn or --force_sparse_attn true/1 to enable, '
+             '--force_sparse_attn false/0 to disable'
+    )
+    parser.add_argument(
         '--sq_double_bits', type=int, default=8,
         help='Bitwidth for double-stream blocks (default: 8)'
     )
@@ -379,7 +390,7 @@ def main():
     )
     parser.add_argument(
         '--few_step', type=str_to_bool, nargs='?', const=False, default=False,
-        help='Enable super resolution (default: true). '
+        help='Disable CFG.'
              'Use --few_step or --few_step true/1 to enable, --few_step false/0 to disable'
     )
     parser.add_argument(

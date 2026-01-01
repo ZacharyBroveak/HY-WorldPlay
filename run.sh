@@ -1,10 +1,10 @@
-export MASTER_PORT=29600
-torchrun --nproc_per_node=1 generate.py \
+#nsys profile -o HY-WorldPlay_Non-CFG_0 
+torchrun --master_port 29600 --nproc_per_node=2 generate.py \
   --prompt "a scene" \
   --image_path "./assets/img/1.png" \
   --resolution "480p" \
   --aspect_ratio "16:9" \
-  --video_length 13 \
+  --video_length 365 \
   --seed 42 \
   --rewrite false \
   --sr false --save_pre_sr_video \
@@ -17,14 +17,28 @@ torchrun --nproc_per_node=1 generate.py \
   --width 832 \
   --height 480 \
   --model_type ar \
-  --generate_heatmaps true \
-  --heatmap_output_dir "./outputs/heatmaps" \
+  --smoothquant \
+  --sq_double_bits 8 \
+  --sq_final_bits 8 \
+  --sq_cond_bits 8 \
+  --sq_layer_bits '{ "double.img_attn.q":5, "double.img_attn.k":5, "double.img_attn.v":5,
+                     "double.img_mod.linear":5, "double.img_attn.proj":5, "double.img_attn.prope_proj":5,
+                     "action_in.fc1":5, "action_in.fc2":5, "time_in.fc1":5,
+                     "time_in.fc2":5, "vision_in.proj.fc1":5, "vision_in.proj.fc2":5,
+                     "byt5_in.fc1":5, "byt5_in.fc2":5, "byt5_in.fc3":5,
+                     "double.txt_attn.q":5, "double.txt_attn.k":5, "double.txt_attn.v":5,
+                     "double.txt_attn.proj":5, "double.txt_mlp.fc1":5, "double.txt_mlp.fc2":5,
+                     "double.txt_mod.linear":5, "final.adaln":5 }' \
+  #--force_sparse_attn false 
+  #--transformer_version 720p_i2v_distilled_sparse \
+  
+  #--sq_single_bits 5 \ 
 
-  #--smoothquant \
-  #--sq_double_bits 5 \
-  #--sq_single_bits 5 \
-  #--sq_final_bits 5 \
-  #--sq_cond_bits 5 \
+  #--offloading true \
+  #--group_offloading true \
+
+  #--generate_heatmaps false \
+  #--heatmap_output_dir "./outputs/heatmaps" \
 
 #export T2V_REWRITE_BASE_URL="<your_vllm_server_base_url>"
 #export T2V_REWRITE_MODEL_NAME="<your_model_name>"

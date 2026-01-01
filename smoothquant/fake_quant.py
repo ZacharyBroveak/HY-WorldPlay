@@ -180,6 +180,8 @@ def quantize_hyworldplay(
         layer_bits: Optional overrides mapping layer names -> bitwidth or None to skip.
             Supported names (globally) and optional per-block overrides with ".<idx>":
               double.img_attn.q/k/v/proj
+              double.img_mod.linear
+              double.txt_mod.linear
               double.txt_attn.q/k/v/proj
               double.img_mlp.fc1/fc2
               double.txt_mlp.fc1/fc2
@@ -254,11 +256,13 @@ def quantize_hyworldplay(
         _quantize_linear_attr(block, "img_attn_k", "double.img_attn.k", idx, block_bits)
         _quantize_linear_attr(block, "img_attn_v", "double.img_attn.v", idx, block_bits)
         _quantize_linear_attr(block, "img_attn_proj", "double.img_attn.proj", idx, block_bits)
+        _quantize_linear_attr(getattr(block, "img_mod", None), "linear", "double.img_mod.linear", idx, block_bits)
 
         _quantize_linear_attr(block, "txt_attn_q", "double.txt_attn.q", idx, block_bits)
         _quantize_linear_attr(block, "txt_attn_k", "double.txt_attn.k", idx, block_bits)
         _quantize_linear_attr(block, "txt_attn_v", "double.txt_attn.v", idx, block_bits)
         _quantize_linear_attr(block, "txt_attn_proj", "double.txt_attn.proj", idx, block_bits)
+        _quantize_linear_attr(getattr(block, "txt_mod", None), "linear", "double.txt_mod.linear", idx, block_bits)
 
         _quantize_mlp(getattr(block, "img_mlp", None), "double.img_mlp", idx, block_bits)
         _quantize_mlp(getattr(block, "txt_mlp", None), "double.txt_mlp", idx, block_bits)
