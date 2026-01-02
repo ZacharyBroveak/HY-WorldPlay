@@ -224,6 +224,21 @@ After editing `run.sh` to configure your settings, run:
 bash run.sh
 ```
 
+### Step-to-Step CKA (CorGi Fig. 2 Style)
+
+Use `cka_steps.py` to compute step-to-step CKA curves (and optional per-block curves) across denoising steps for action regimes:
+
+```bash
+python cka_steps.py \
+  --model-path $MODEL_PATH \
+  --action-ckpt $AR_ACTION_MODEL_PATH \
+  --transformer-version 480p_i2v \
+  --action-regimes noop,forward,right \
+  --num-inference-steps 10 \
+  --output-dir outputs/cka_steps
+```
+
+This writes step-to-step CKA curves per action to `outputs/cka_steps`. Add `--skip-blocks` to skip per-block curves.
 
 ## 📊 Evaluation
 

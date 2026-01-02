@@ -21,18 +21,12 @@ torchrun --master_port 29600 --nproc_per_node=2 generate.py \
   --sq_double_bits 8 \
   --sq_final_bits 8 \
   --sq_cond_bits 8 \
-  --sq_layer_bits '{ "double.img_attn.q":5, "double.img_attn.k":5, "double.img_attn.v":5,
-                     "double.img_mod.linear":5, "double.img_attn.proj":5, "double.img_attn.prope_proj":5,
-                     "action_in.fc1":5, "action_in.fc2":5, "time_in.fc1":5,
-                     "time_in.fc2":5, "vision_in.proj.fc1":5, "vision_in.proj.fc2":5,
-                     "byt5_in.fc1":5, "byt5_in.fc2":5, "byt5_in.fc3":5,
-                     "double.txt_attn.q":5, "double.txt_attn.k":5, "double.txt_attn.v":5,
-                     "double.txt_attn.proj":5, "double.txt_mlp.fc1":5, "double.txt_mlp.fc2":5,
-                     "double.txt_mod.linear":5, "final.adaln":5 }' \
-  #--force_sparse_attn false 
+  --sq_layer_bits '{ "double.img_mod.linear":4 }'
+
+  #--sq_single_bits 8 
+
   #--transformer_version 720p_i2v_distilled_sparse \
-  
-  #--sq_single_bits 5 \ 
+  #--force_sparse_attn true 
 
   #--offloading true \
   #--group_offloading true \

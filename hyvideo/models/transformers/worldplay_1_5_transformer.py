@@ -257,6 +257,8 @@ class MMDoubleStreamBlock(nn.Module):
             (img_q, img_q_prope),
             (img_k, img_k_prope),
             (img_v, img_v_prope),
+            attn_mode=self.attn_mode,
+            attn_param=attn_param,
             block_idx=block_idx,
             kv_cache=kv_cache,
             cache_vision=cache_vision,
@@ -1032,7 +1034,13 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
             _kv_cache_new = []
             transformer_num_layers = len(self.double_blocks)
             for _ in range(transformer_num_layers):
-                _kv_cache_new.append({'k_vision': None, 'v_vision': None, 'k_txt': None, 'v_txt': None})
+                _kv_cache_new.append({
+                    'k_vision': None,
+                    'v_vision': None,
+                    'q_vision': None,
+                    'k_txt': None,
+                    'v_txt': None,
+                })
 
         txt, text_mask, vec_txt = self.get_text_and_mask(
             encoder_attention_mask,
@@ -1092,8 +1100,13 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
             _kv_cache_new = []
             transformer_num_layers = len(self.double_blocks)
             for i in range(transformer_num_layers):
-                _kv_cache_new.append({'k_vision': None, 'v_vision': None,
-                                      'k_txt': kv_cache[i]['k_txt'], 'v_txt': kv_cache[i]['v_txt']})
+                _kv_cache_new.append({
+                    'k_vision': None,
+                    'v_vision': None,
+                    'q_vision': None,
+                    'k_txt': kv_cache[i]['k_txt'],
+                    'v_txt': kv_cache[i]['v_txt'],
+                })
 
         img = x = hidden_states
         t = timestep
@@ -1171,6 +1184,8 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
             if cache_vision:
                 _kv_cache_new[index]['k_vision'] = vision_kv['k_vision']
                 _kv_cache_new[index]['v_vision'] = vision_kv['v_vision']
+                if 'q_vision' in vision_kv:
+                    _kv_cache_new[index]['q_vision'] = vision_kv['q_vision']
 
         if cache_vision:
             return _kv_cache_new
@@ -1386,4 +1401,3 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
         for block in self.single_blocks:
             # Set the attention mode for each block in single_blocks
             block.attn_mode = attn_mode
-

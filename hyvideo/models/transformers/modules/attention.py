@@ -178,6 +178,8 @@ def sequence_parallel_attention_txt(q, k, v,
 
 @torch.compiler.disable
 def sequence_parallel_attention_vision(q, k, v,
+                                attn_mode=None,
+                                attn_param=None,
                                 block_idx=None,
                                 kv_cache=None,
                                 cache_vision=False,
@@ -207,30 +209,139 @@ def sequence_parallel_attention_vision(q, k, v,
     key = key.transpose(1, 2)
     value = value.transpose(1, 2)
 
-    cache_vision_key = kv_cache[block_idx]['k_vision'] # previous key
-    cache_vision_value = kv_cache[block_idx]['v_vision'] # previous value
+    current_seq_len = query.shape[2]
+    cache_vision_key = kv_cache[block_idx]['k_vision']  # previous key
+    cache_vision_value = kv_cache[block_idx]['v_vision']  # previous value
+    cache_vision_query = kv_cache[block_idx].get('q_vision')
 
     vision_kv = {}
     if cache_vision:
         vision_kv['k_vision'] = key
         vision_kv['v_vision'] = value
 
-    if not cache_vision and cache_vision_key is not None:
-        key = torch.cat([cache_vision_key, key], dim=2)
-        value = torch.cat([cache_vision_value, value], dim=2)
+    if attn_mode is None:
+        attn_mode = "torch"
+    else:
+        attn_mode = maybe_fallback_attn_mode(attn_mode, get_infer_state(), block_idx)
 
     encoder_key = kv_cache[block_idx]['k_txt']
     encoder_value = kv_cache[block_idx]['v_txt']
     encoder_key = repeat(encoder_key, 'B H S D->(B R) H S D', R=2)
     encoder_value = repeat(encoder_value, 'B H S D->(B R) H S D', R=2)
 
-    key = torch.cat([encoder_key, key], dim=2)
-    value = torch.cat([encoder_value, value], dim=2)
+    if attn_mode == "flex-block-attn":
+        if attn_param is None:
+            raise ValueError("attn_param is required for flex-block-attn in AR vision attention.")
 
-    hidden_states = F.scaled_dot_product_attention(query, key, value, dropout_p=0.0, is_causal=False)
+        if cache_vision:
+            vision_kv['q_vision'] = query
 
-    # transpose back
-    hidden_states = hidden_states.transpose(1, 2)  # [B, S, H, D]
+        image_query = query
+        image_key = key
+        image_value = value
+        cache_len = 0
+        if not cache_vision and cache_vision_key is not None:
+            image_key = torch.cat([cache_vision_key, key], dim=2)
+            image_value = torch.cat([cache_vision_value, value], dim=2)
+            cache_len = cache_vision_key.shape[2]
+            if cache_vision_query is None:
+                pad_query = torch.zeros(
+                    (query.shape[0], query.shape[1], cache_len, query.shape[3]),
+                    device=query.device,
+                    dtype=query.dtype,
+                )
+                image_query = torch.cat([pad_query, query], dim=2)
+            else:
+                image_query = torch.cat([cache_vision_query, query], dim=2)
+
+        text_len = encoder_key.shape[2] if encoder_key is not None else 0
+        if text_len > 0:
+            text_query = encoder_key.to(query.dtype)
+            query = torch.cat([image_query, text_query], dim=2)
+            key = torch.cat([image_key, encoder_key], dim=2)
+            value = torch.cat([image_value, encoder_value], dim=2)
+        else:
+            query = image_query
+            key = image_key
+            value = image_value
+
+        sparse_type = attn_param["attn_sparse_type"]  # sta/block_attn/ssta
+        ssta_threshold = attn_param["ssta_threshold"]
+        ssta_lambda = attn_param["ssta_lambda"]
+        ssta_sampling_type = attn_param["ssta_sampling_type"]
+        ssta_adaptive_pool = attn_param["ssta_adaptive_pool"]
+        attn_pad_type = attn_param["attn_pad_type"]  # repeat/zero
+        attn_mask_share_within_head = attn_param["attn_mask_share_within_head"]
+        ssta_topk = attn_param["ssta_topk"]
+        thw = attn_param["thw"]
+        tile_size = attn_param["tile_size"]
+        win_size = attn_param["win_size"][0].copy()
+
+        spatial_tokens = thw[1] * thw[2]
+        image_seq_len = image_query.shape[2]
+        if image_seq_len % spatial_tokens != 0:
+            raise ValueError(
+                f"Image seq_len {image_seq_len} must be divisible by spatial tokens {spatial_tokens}."
+            )
+        total_t = image_seq_len // spatial_tokens
+        canvas_thw = [total_t, thw[1], thw[2]]
+
+        def get_image_tile(tile_size):
+            block_size = np.prod(tile_size)
+            if block_size == 384:
+                tile_size = (1, 16, 24)
+            elif block_size == 128:
+                tile_size = (1, 16, 8)
+            elif block_size == 64:
+                tile_size = (1, 8, 8)
+            elif block_size == 16:
+                tile_size = (1, 4, 4)
+            else:
+                raise ValueError(f"Error tile_size {tile_size}, only support in [16, 64, 128, 384]")
+            return tile_size
+
+        if canvas_thw[0] == 1:
+            tile_size = get_image_tile(tile_size)
+            win_size = [1, 1, 1]
+        elif canvas_thw[0] <= 31:  # 16fps: 5 * 16 / 4 + 1 = 21; 24fps: 5 * 24 / 4 + 1 = 31
+            ssta_topk = ssta_topk // 2
+
+        hidden_states = ssta_3d_attention(
+            query,
+            key,
+            value,
+            canvas_thw,
+            topk=ssta_topk,
+            tile_thw=tile_size,
+            kernel_thw=win_size,
+            text_len=text_len,
+            sparse_type=sparse_type,
+            threshold=ssta_threshold,
+            lambda_=ssta_lambda,
+            pad_type=attn_pad_type,
+            text_mask=None,
+            sampling_type=ssta_sampling_type,
+            adaptive_pool=ssta_adaptive_pool,
+            mask_share_within_head=attn_mask_share_within_head,
+        )
+        hidden_states, _ = hidden_states
+        if text_len > 0:
+            hidden_states = hidden_states[:, :, :-text_len, :]
+        if cache_len > 0:
+            hidden_states = hidden_states[:, :, -current_seq_len:, :]
+        hidden_states = hidden_states.permute(0, 2, 1, 3)  # [B, S, H, D]
+    else:
+        if not cache_vision and cache_vision_key is not None:
+            key = torch.cat([cache_vision_key, key], dim=2)
+            value = torch.cat([cache_vision_value, value], dim=2)
+
+        key = torch.cat([encoder_key, key], dim=2)
+        value = torch.cat([encoder_value, value], dim=2)
+
+        hidden_states = F.scaled_dot_product_attention(query, key, value, dropout_p=0.0, is_causal=False)
+
+        # transpose back
+        hidden_states = hidden_states.transpose(1, 2)  # [B, S, H, D]
 
     if enable_sp:
         hidden_states = all_to_all_4D(hidden_states, sp_group, scatter_dim=1, gather_dim=2)
