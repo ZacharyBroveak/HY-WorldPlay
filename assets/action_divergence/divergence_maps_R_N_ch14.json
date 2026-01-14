@@ -1,0 +1,15 @@
+{
+  "maps_path": "outputs/action_divergence/divergence_maps_R_N_ch14.npy",
+  "shape": [
+    4,
+    4,
+    32,
+    32
+  ],
+  "action_id": 27,
+  "action_label": "R/N",
+  "base_action_id": 0,
+  "base_action_label": "S/N",
+  "num_steps": 4,
+  "channel_index": 14
+}
