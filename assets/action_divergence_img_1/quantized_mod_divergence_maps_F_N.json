@@ -1,0 +1,14 @@
+{
+  "maps_path": "outputs/action_divergence_img_1/quantized_mod_divergence_maps_F_N.npy",
+  "shape": [
+    4,
+    4,
+    32,
+    32
+  ],
+  "action_id": 9,
+  "action_label": "F/N",
+  "base_action_id": 0,
+  "base_action_label": "S/N",
+  "num_steps": 4
+}

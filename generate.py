@@ -100,7 +100,7 @@ def pose_to_input(pose_json_path, latent_chunk_num, tps=False):
                 if trans_angles_deg[2] < 60:
                     trans_one_hot[i, 0] = 1  # forward
                 elif trans_angles_deg[2] > 120:
-                    trans_one_hot[i, 1] = 1  # backward
+                    trans_one_hot[i, 1] = 1  # baHunyuanVideo_1_5_Pipeline.ward
 
                 if trans_angles_deg[0] < 60:
                     trans_one_hot[i, 2] = 1  # right
@@ -198,6 +198,13 @@ def generate_video(args):
         except json.JSONDecodeError as exc:
             raise ValueError(f"Invalid JSON for --sq_layer_bits: {args.sq_layer_bits}") from exc
 
+    viditq_layer_bits = None
+    if args.viditq_layer_bits:
+        try:
+            viditq_layer_bits = json.loads(args.viditq_layer_bits)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON for --viditq_layer_bits: {args.viditq_layer_bits}") from exc
+
     if args.smoothquant:
         from smoothquant.fake_quant import quantize_hyworldplay
 
@@ -208,6 +215,22 @@ def generate_video(args):
             final_n_bits=args.sq_final_bits,
             cond_n_bits=args.sq_cond_bits,
             layer_bits=layer_bits,
+        )
+
+    if args.viditq:
+        if args.smoothquant:
+            rank0_log("Both --smoothquant and --viditq are enabled; ViDiT-Q will run after SmoothQuant.", "WARNING")
+        from smoothquant.fake_quant import quantize_hyworldplay_viditq
+
+        quantize_hyworldplay_viditq(
+            pipe.transformer,
+            double_n_bits=args.viditq_double_bits,
+            single_n_bits=args.viditq_single_bits,
+            final_n_bits=args.viditq_final_bits,
+            cond_n_bits=args.viditq_cond_bits,
+            alpha=args.viditq_alpha,
+            layer_bits=viditq_layer_bits,
+            auto_calibrate=args.viditq_auto_calib,
         )
 
     extra_kwargs = {}
@@ -345,6 +368,10 @@ def main():
         help='Enable SmoothQuant-style fake quantization for the transformer blocks'
     )
     parser.add_argument(
+        '--viditq', action='store_true',
+        help='Enable ViDiT-Q style fake quantization for modulation layers'
+    )
+    parser.add_argument(
         '--force_sparse_attn', type=str_to_bool, nargs='?', const=True, default=False,
         help='Force sparse attention (flex-block-attn/SSTA). '
              'Use --force_sparse_attn or --force_sparse_attn true/1 to enable, '
@@ -369,6 +396,34 @@ def main():
     parser.add_argument(
         '--sq_layer_bits', type=str, default=None,
         help='Optional JSON mapping of layer names to bitwidths/None for overrides'
+    )
+    parser.add_argument(
+        '--viditq_double_bits', type=int, default=None,
+        help='Bitwidth for double-stream blocks (omit to keep full precision)'
+    )
+    parser.add_argument(
+        '--viditq_single_bits', type=int, default=None,
+        help='Bitwidth for single-stream blocks (omit to keep full precision)'
+    )
+    parser.add_argument(
+        '--viditq_final_bits', type=int, default=None,
+        help='Bitwidth for the final projection (omit to keep full precision)'
+    )
+    parser.add_argument(
+        '--viditq_cond_bits', type=int, default=None,
+        help='Bitwidth for timestep/action/vector embedders (omit to keep full precision)'
+    )
+    parser.add_argument(
+        '--viditq_alpha', type=float, default=0.75,
+        help='ViDiT-Q channel balancing alpha (default: 0.75)'
+    )
+    parser.add_argument(
+        '--viditq_layer_bits', type=str, default=None,
+        help='Optional JSON mapping of layer names to bitwidths/None for overrides'
+    )
+    parser.add_argument(
+        '--viditq_auto_calib', type=str_to_bool, nargs='?', const=True, default=True,
+        help='Initialize ViDiT-Q channel masks from the first forward pass (default: true)'
     )
     parser.add_argument(
         '--seed', type=int, default=123,

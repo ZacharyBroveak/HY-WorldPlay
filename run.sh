@@ -17,11 +17,26 @@ torchrun --master_port 29600 --nproc_per_node=2 generate.py \
   --width 832 \
   --height 480 \
   --model_type ar \
-  --smoothquant \
-  --sq_double_bits 8 \
-  --sq_final_bits 8 \
-  --sq_cond_bits 8 \
-  --sq_layer_bits '{ "double.img_mod.linear":4 }'
+  --viditq \
+  --viditq_double_bits 8 \
+  --viditq_final_bits 8 \
+  --viditq_cond_bits 8 \
+  --viditq_layer_bits '{ "double.img_attn.q":5, "double.img_attn.k":5, "double.img_attn.v":5,
+                     "double.img_mod.linear":5, "double.img_attn.proj":5, "double.img_attn.prope_proj":5,
+                     "action_in.fc1":5, "action_in.fc2":5, "time_in.fc1":5,
+                     "time_in.fc2":5, "vision_in.proj.fc1":5, "vision_in.proj.fc2":5,
+                     "byt5_in.fc1":5, "byt5_in.fc2":5, "byt5_in.fc3":5,
+                     "double.txt_attn.q":5, "double.txt_attn.k":5, "double.txt_attn.v":5,
+                     "double.txt_attn.proj":5, "double.txt_mlp.fc1":5, "double.txt_mlp.fc2":5,
+                     "double.txt_mod.linear":5, "final.adaln":5 }'
+  
+  #--viditq_single_bits 8 \
+
+  #--smoothquant \
+  #--sq_double_bits 8 \
+  #--sq_final_bits 8 \
+  #--sq_cond_bits 8 \
+  #--sq_layer_bits '{ "double.img_mod.linear":4 }'
 
   #--sq_single_bits 8 
 

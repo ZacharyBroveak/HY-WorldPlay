@@ -1,0 +1,13 @@
+{
+  "divergence": [
+    5.198605060577393,
+    10.186060905456543,
+    21.43580436706543,
+    69.43711853027344
+  ],
+  "action_id": 27,
+  "action_label": "R/N",
+  "base_action_id": 0,
+  "base_action_label": "S/N",
+  "num_steps": 4
+}
